@@ -1,0 +1,348 @@
+# Header =====================================================
+# Title:        
+# Description:   
+# Date:          
+# Author:        Chi-Chao Hung
+# Version:       v1.1
+
+# Change Log:
+# - 2025-01-03 (v1):  Add first step()
+# - 2025-01-05 (v1.1): Correct Variables names in cluster_table()
+
+# Inputs:        
+# Outputs:       
+# Replication:   [Instructions for reproducing the results, e.g., "Run scripts in the following order..."]
+# Notes:         [Additional notes about assumptions, data sources, or ethical considerations]
+# =====================================================
+
+
+# Reorder
+require(data.table)
+require(kableExtra)
+
+
+first_step <- function(dt, g, col = NULL){
+  require(stats)
+  require(data.table)
+  cat("Dt should include GSAT score, Require library(stats) ","\n", 
+      "Select Features, standardize,set seed, kmeans","\n",
+      "dt: main sample with GSAT, g:number of clusters, col: features")
+  
+  dt <- as.data.table(dt)
+  # Drop observations with no GSAT score (most of them should have)
+  dt_m <- dt[! is.na(Ch) ]
+  #print(class(dt_m))
+  
+  col_vec <- c()
+  # List Used Features
+  if ( is.null(col) ){
+    col_vec <- c( "Ch","EN","Math","Social","Nature","D4","D5")
+  }else{ 
+    col_vec <- col }
+  
+  # Try standardize (only the GSAT scores)
+  stand_data <- dt_m[,..col_vec]
+  stand_data[, c(1:5)  := lapply(.SD, scale), .SDcols = c(1:5)]
+  
+  ### --- Perform k-means clustering ----
+  set.seed(123) # seed 123
+  kmeans_result <- kmeans(stand_data, centers = g)
+  #cdata$cluster_id <- NULL
+  dt_m[, cluster_id := factor(kmeans_result$cluster)]
+  #......................................
+  
+  return(dt_m)
+}
+
+cluster_table <- function(dt, new_order, latex = TRUE, ks = k){
+  
+  print("Requirement: data with column \"cluster_id\" ")
+  
+  dt[, cluster_id := factor(cluster_id , levels = new_order)]
+  dt <- dt[! is.na(cluster_id ),]
+  print(dt[,.N,by= cluster_id])
+  dt[, G1 := g1 > 0]
+  dt[, G2 := g2 > 0]
+  dt[, G3 := g3 > 0]
+  dt[ , ':='("urban" = (loc %in% c("台北","台中","台南","新北","高雄","桃園")),
+             "year104" = (year == 104),
+             "year105" = (year == 105),
+             "year106" = (year == 106),
+             "year107" = (year == 107),
+             "year108" = (year == 108),
+             "year109" = (year == 109)
+  )]
+  
+  # GSAT Score (only those > 0)
+  cols1 <- c("Ch", "EN", "Math", "Social", "Nature")
+  tab1 <- dt[, lapply(.SD, function(x) round(mean(x[x != 0]),2)), 
+        by = cluster_id, .SDcols = cols1][order(cluster_id)]
+  
+  
+  # Whether GSAT missing
+  cols2 <- c("D1", "D2", "D3", "D4", "D5")
+  tab2 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+        by = cluster_id, .SDcols = cols2][order(cluster_id)]
+  
+  
+  # Their Choice Set
+  cols3 <- c("G1","G2","G3")
+  tab3 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+             by = cluster_id, .SDcols = cols3][order(cluster_id)]
+
+  # Gender
+  tab4 <- dt[,.(round(mean(gender=="Male"),2),round(mean(gender=="Female"),2)), 
+                by = cluster_id][order(cluster_id)]
+  
+  tab5 <- dt[,.(sum(year104),sum(year105),sum(year106),
+           sum(year107),sum(year108),sum(year109)),by = cluster_id]
+  
+  North <- c("台北", "新北", "基隆", "桃市", "新竹")
+  Central <- c("苗栗", "台中", "彰化", "南投", "雲林")
+  South <- c("嘉義", "台南", "高雄", "屏東","澎湖")
+  Other <- c("宜蘭","花蓮","台東")
+    
+  tab6 <- dt[,.(round(mean(loc %in% North),2),round(mean(loc %in% Central),2),
+                round(mean(loc %in% South),2), round(mean(loc %in% Other),2)),
+             by = cluster_id][order(cluster_id)]
+  
+  # Number of observations
+  app_num <-  dt[,.N,by= cluster_id][order(cluster_id)]
+  
+  # Merge
+  dt_list <- list(tab1,tab2, tab3, tab4, tab6, app_num)
+  merged_dt <- Reduce(function(x, y) merge(x, y, by = "cluster_id", all = TRUE), dt_list)
+  
+  sum_tab <- setDT(transpose(merged_dt[, .SD, .SDcols = !c("cluster_id")]))
+  sum_tab <- data.table("Variables" = c(c("Chinese", "English", "Math", "Social Sci.", "Natural Sci."),
+                                        c("Chinese", "English", "Math", "Social", "Natural Sci."),
+                                        cols3, 
+                                        c("Male","Female"),
+                                        c("North","Central","South","Other"),
+                                        c("Obs.")),
+                        sum_tab)
+  
+  
+  kb <- kbl(sum_tab, format = if(latex == T){"latex"}, 
+            caption = paste0("Cluster Table K =", ks), booktabs = T) %>% 
+    kable_styling() %>%
+    #add_header_above(c(" " = 1, "(I)" = 1, "(II)" = 1, "(III)" = 1, "(IV)" =1 ))%>%
+    pack_rows("Panel A: GSAT", 1, 5, italic = T) %>%
+    pack_rows("Panel B: Missing", 6, 10, italic = T) %>%
+    pack_rows("Panel C: Choice Set", 11, 13, italic = T)  %>%
+    pack_rows("Panel D: Demographic", 14, 19, italic = T) %>%
+    footnote(number = c("Footnote 1; ", "Footnote 2; "),
+             general = "This table is generated by kableExtra",
+           threeparttable = T)
+  
+  
+  return(kb)
+}
+
+# Column Head
+# Three  part table
+
+cluster_table_temp <- function(dt, new_order, latex = TRUE, ks = k){
+  
+  print("Requirement: data with column \"cluster_id\" ")
+  
+  dt[, cluster_id := factor(cluster_id , levels = new_order)]
+  dt <- dt[! is.na(cluster_id ),]
+  print(dt[,.N,by= cluster_id])
+  dt[, G1 := g1 > 0]
+  dt[, G2 := g2 > 0]
+  dt[, G3 := g3 > 0]
+  dt[ , ':='("urban" = (loc %in% c("台北","台中","台南","新北","高雄","桃園")),
+             "year104" = (year == 104),
+             "year105" = (year == 105),
+             "year106" = (year == 106),
+             "year107" = (year == 107),
+             "year108" = (year == 108),
+             "year109" = (year == 109)
+  )]
+  
+  # GSAT Score (only those > 0)
+  cols1 <- c("Ch", "EN", "Math", "Social", "Nature")
+  tab1 <- dt[, lapply(.SD, function(x) round(mean(x[x != 0]),2)), 
+             by = cluster_id, .SDcols = cols1][order(cluster_id)]
+  
+  tab1.2 <- dt[, lapply(.SD, function(x) round(mean(x),2)), 
+             by = cluster_id, .SDcols = cols1][order(cluster_id)]
+  
+  # Whether GSAT missing
+  cols2 <- c("D1", "D2", "D3", "D4", "D5")
+  tab2 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+             by = cluster_id, .SDcols = cols2][order(cluster_id)]
+  
+  
+  # Their Choice Set
+  cols3 <- c("G1","G2","G3")
+  tab3 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+             by = cluster_id, .SDcols = cols3][order(cluster_id)]
+  
+  # Gender
+  tab4 <- dt[,.(round(mean(gender=="Male"),2),round(mean(gender=="Female"),2)), 
+             by = cluster_id][order(cluster_id)]
+  
+  tab5 <- dt[,.(sum(year104),sum(year105),sum(year106),
+                sum(year107),sum(year108),sum(year109)),by = cluster_id]
+  
+  North <- c("台北", "新北", "基隆", "桃市", "新竹")
+  Central <- c("苗栗", "台中", "彰化", "南投", "雲林")
+  South <- c("嘉義", "台南", "高雄", "屏東","澎湖")
+  Other <- c("宜蘭","花蓮","台東")
+  
+  tab6 <- dt[,.(round(mean(loc %in% North),2),round(mean(loc %in% Central),2),
+                round(mean(loc %in% South),2), round(mean(loc %in% Other),2),
+                round(mean(urban == TRUE),2)),
+             by = cluster_id][order(cluster_id)]
+  
+  # Number of observations
+  app_num <-  dt[,.N,by= cluster_id][order(cluster_id)]
+  
+  # Merge
+  dt_list <- list(tab1.2, tab2, tab3, tab4, tab6, app_num, tab1)
+  merged_dt <- Reduce(function(x, y) merge(x, y, by = "cluster_id", all = TRUE), dt_list)
+  
+  sum_tab <- setDT(transpose(merged_dt[, .SD, .SDcols = !c("cluster_id")]))
+  sum_tab <- data.table("Variables" = c(c("Chinese", "English", "Math", "Social Sci.", "Natural Sci."),
+                                        c("Chinese", "English", "Math", "Social", "Natural Sci."),
+                                        cols3, 
+                                        c("Male","Female"),
+                                        c("North","Central","South","Other","Urban"),
+                                        c("Obs.")),
+                        sum_tab)
+  
+  # FIXME
+  colnames(sum_tab) <- c("Variables", "Type1","Type2","Type3","Type4")
+  for (col in 1:ks) {
+    new_col_name <- paste0("empty", col)
+    sum_tab[, (new_col_name) := ""]
+  }
+  setcolorder(sum_tab, c("Variables", "Type1","empty1","Type2",
+                         "empty2","Type3","empty3","Type4","empty4"))
+  
+  kb <- kbl(sum_tab, format = if(latex == T){"latex"}, 
+            caption = paste0("Cluster Table K =", ks), booktabs = T) %>% 
+    kable_styling() %>%
+    add_header_above(c(" " = 1, "(I)" = 2, "(II)" = 2, "(III)" = 2, "(IV)" = 2 ))%>%
+    pack_rows("Panel A: GSAT", 1, 5, italic = T) %>%
+    pack_rows("Panel B: Missing", 6, 10, italic = T) %>%
+    pack_rows("Panel C: Choice Set", 11, 13, italic = T)  %>%
+    pack_rows("Panel D: Demographic", 14, 20, italic = T) %>%
+    footnote(number = c("Footnote 1; ", "Footnote 2; "),
+             general = "This table is generated by kableExtra",
+             threeparttable = T)
+  
+  
+  return(kb)
+}
+
+
+
+
+
+cluster_table_n <- function(dt, new_order, latex = TRUE, ks = k){
+  
+  print("Requirement: data with column \"cluster_id\" ")
+  
+  dt[, cluster_id := factor(cluster_id , levels = new_order)]
+  dt <- dt[! is.na(cluster_id ),]
+  print(dt[,.N,by= cluster_id])
+  dt[, G1 := g1 > 0]
+  dt[, G2 := g2 > 0]
+  dt[, G3 := g3 > 0]
+  dt[ , ':='("urban" = (loc %in% c("台北","台中","台南","新北","高雄","桃園")),
+             "year104" = (year == 104),
+             "year105" = (year == 105),
+             "year106" = (year == 106),
+             "year107" = (year == 107),
+             "year108" = (year == 108),
+             "year109" = (year == 109)
+  )]
+  
+  # GSAT Score (only those > 0)
+  cols1 <- c("Ch", "EN", "Math", "Social", "Nature")
+  tab1 <- dt[, lapply(.SD, function(x) round(mean(x[x != 0]),2)), 
+             by = cluster_id, .SDcols = cols1][order(cluster_id)]
+  
+  tab1.2 <- dt[, lapply(.SD, function(x) round(mean(x),2)), 
+               by = cluster_id, .SDcols = cols1][order(cluster_id)]
+  
+  # Whether GSAT missing
+  cols2 <- c("D1", "D2", "D3", "D4", "D5")
+  tab2 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+             by = cluster_id, .SDcols = cols2][order(cluster_id)]
+  
+  
+  # Their Choice Set
+  cols3 <- c("G1","G2","G3")
+  tab3 <- dt[, lapply(.SD, function(x) round(mean(x, na.rm = TRUE),2)), 
+             by = cluster_id, .SDcols = cols3][order(cluster_id)]
+  
+  # Gender
+  tab4 <- dt[,.(round(mean(gender=="Male"),2),round(mean(gender=="Female"),2)), 
+             by = cluster_id][order(cluster_id)]
+  
+  tab5 <- dt[,.(sum(year104),sum(year105),sum(year106),
+                sum(year107),sum(year108),sum(year109)),by = cluster_id]
+  
+  North <- c("台北", "新北", "基隆", "桃市", "新竹")
+  Central <- c("苗栗", "台中", "彰化", "南投", "雲林")
+  South <- c("嘉義", "台南", "高雄", "屏東","澎湖")
+  Other <- c("宜蘭","花蓮","台東")
+  
+  tab6 <- dt[,.(round(mean(loc %in% North),2),round(mean(loc %in% Central),2),
+                round(mean(loc %in% South),2), round(mean(loc %in% Other),2),
+                round(mean(urban == TRUE),2)),
+             by = cluster_id][order(cluster_id)]
+  
+  # Number of observations
+  app_num <-  dt[,.N,by= cluster_id][order(cluster_id)]
+  
+  # Merge
+  dt_list <- list(tab1.2, tab2, tab3, tab4, tab6, app_num, tab1)
+  merged_dt <- Reduce(function(x, y) merge(x, y, by = "cluster_id", all = TRUE), dt_list)
+  
+  sum_tab <- setDT(transpose(merged_dt[, .SD, .SDcols = !c("cluster_id")]))
+  sum_tab <- data.table("Variables" = c(c("Chinese", "English", "Math", "Social Sci.", "Natural Sci."),
+                                        c("Chinese", "English", "Math", "Social", "Natural Sci."),
+                                        cols3, 
+                                        c("Male","Female"),
+                                        c("North","Central","South","Other","Urban"),
+                                        c("Obs.")),
+                        sum_tab)
+  
+  
+  colnames(sum_tab) <- c("Variables",  paste0("Type", 1:ks))
+  for (col in 1:ks) {
+    new_col_name <- paste0("empty", col)
+    sum_tab[, (new_col_name) := ""]
+  }
+  setcolorder(sum_tab, c("Variables", paste0(c("Type","empty"), rep( 1:ks, each = 2))  ))
+  
+  # Dynamically create header labels for kableExtra
+  header_labels <- c(" " = 1)  # First column for the row labels
+  # Append dynamic model labels (e.g., "(I)", "(II)", "(III)", etc.)
+  header_labels <- c(header_labels, setNames(rep(2, ks), 
+                                             paste0("(",  1:ks , ")")))
+  
+  
+  kb <- kbl(sum_tab, format = if(latex == T){"latex"}, 
+            caption = paste0("Cluster Table K =", ks), booktabs = T) %>% 
+    kable_styling() %>%
+    add_header_above( header_labels )%>%
+    pack_rows("Panel A: GSAT", 1, 5, italic = T) %>%
+    pack_rows("Panel B: Missing", 6, 10, italic = T) %>%
+    pack_rows("Panel C: Choice Set", 11, 13, italic = T)  %>%
+    pack_rows("Panel D: Demographic", 14, 20, italic = T) %>%
+    footnote(number = c("Footnote 1; ", "Footnote 2; "),
+             general = "This table is generated by kableExtra",
+             threeparttable = T)
+  
+  return(kb)
+}
+
+
+
+

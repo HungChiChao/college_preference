@@ -1,0 +1,107 @@
+---
+title: "Major_Summary"
+author: "Hung, Chi-Chao"
+date: "2025-01-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The content of this Rmd follows 0421_category_distribution.Rmd
+
+
+```{r}
+getwd()
+library(data.table)
+library(kableExtra)
+```
+
+## Read file
+```{r}
+setwd("/Users/hungchichao/Documents/GitHub/College_Department_Choice")
+combined_dt <- fread("01Data/combined_data250107.csv")
+combined_idv <- unique(combined_dt[, .(Year, id, school_0, department_0, Gender_full_name)])
+rm(combined_dt)
+```
+
+
+```{r}
+setwd("/Users/hungchichao/Documents/GitHub/College_Department_Choice")
+ref_tab <- fread("01Data/complete_reference_table_0421.csv")
+combined_idv[, V1 := paste0(school_0,department_0) ]
+combined_idv[, Gender := Gender_full_name ]
+combined_idv <- combined_idv[school_0 != ""]
+combined_idv[ref_tab, on="V1", c("category","field") := .(i.Eng_Category,i.Eng_Field)]
+```
+
+## Analysis
+
+```{r}
+field_sum <- combined_idv[, .N, by = .(Year, field)]
+category_sum <- combined_idv[, .N, by = .(Year, category)]
+```
+
+
+```{r}
+dt <- field_sum[ Year %in% c(104,109)] 
+
+dt[, share := round(N / sum(N), 2 ),by = Year]
+
+dt1 <- dcast(dt, field ~ Year , value.var = c("N","share"))
+
+dt1<- dt1[,.(field, N_104, share_104, N_109, share_109)][! is.na(field) ]
+```
+
+
+
+```{r}
+latex <- T
+kb <- kbl( dt1, format = if(latex == T){"latex"}, 
+          caption = "Final Placement by Major", booktabs = T) %>% 
+  kable_styling() %>%
+  add_header_above(c(" "= 1, "2015" = 2, "2020" = 2 ))%>%
+  footnote(number = c("Footnote 1; "),
+           general = "Here is a very long",
+           threeparttable = T)
+
+filename <- paste0("Major_Summary",format(Sys.Date(), "%m%d") ,".tex")
+writeLines(kb, con = filename)
+
+```
+
+## Major Summary by Gender
+
+```{r}
+field_sum_gender <- combined_idv[, .N, by = .(Year, field, Gender)]
+setorder(field_sum_gender, Year, field, Gender)
+```
+
+```{r}
+dt <- field_sum_gender[ Year %in% c(104,109)] 
+dt[, share := round(N / sum(N), 2 ), by = .(Year, field)]
+
+dt <- dt[! is.na(field) & Gender %in% c("Male", "Female")]
+```
+
+```{r}
+dt1 <- dcast(dt, field ~ Year + Gender, value.var = c("share"))
+colnames(dt1) <- c("Year","Female","Male","Female","Male")
+```
+
+```{r}
+latex <- T
+kb <- kbl( dt1, format = if(latex == T){"latex"}, 
+          caption = "Major by Gender", booktabs = T) %>% 
+  kable_styling() %>%
+  add_header_above(c(" "= 1, "2015" = 2, "2020" = 2 ))%>%
+  footnote(number = c("Footnote 1; "),
+           general = "Here is a very long",
+           threeparttable = T)
+filename <- paste0("Major_gender_sum",format(Sys.Date(), "%m%d") ,".tex")
+writeLines(kb, con = filename)
+```
+
+
+
